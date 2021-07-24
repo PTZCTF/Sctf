@@ -1,0 +1,2 @@
+*.py			@PTZCTF/backend
+{static,templates}/*	@PTZCTF/frontend
