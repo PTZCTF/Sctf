@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 # Sctf
 
+import quart.flask_patch  # must be the first import
 import pygeoip, markdown, werkzeug, astral.sun, astral.geocoder, css_html_js_minify
 import quart; quart.htmlsafe_dumps = None
-import quart.flask_patch
 from quart import *
 from flask_login import UserMixin, LoginManager, login_user, logout_user, current_user, login_required
 from flask_sqlalchemy import SQLAlchemy
@@ -142,10 +142,12 @@ def before_request():
 	g.builtins, g.operator = builtins, operator
 
 @app.after_request
-def after_request(r):
-	if ('text/html' in r.content_type): r.set_data(css_html_js_minify.html_minify(r.get_data(as_text=True)))
-	elif ('text/css' in r.content_type): r.set_data(css_html_js_minify.css_minify(r.get_data(as_text=True)))
-	elif ('text/javascript' in r.content_type or 'application/javascript' in r.content_type): r.set_data(css_html_js_minify.js_minify(r.get_data(as_text=True)))
+async def after_request(r):
+	### TODO:
+	#if ('text/html' in r.content_type): r.set_data(css_html_js_minify.html_minify(await r.get_data(as_text=True), comments=True))
+	#elif ('text/css' in r.content_type): r.set_data(css_html_js_minify.css_minify(await r.get_data(as_text=True)))
+	#elif ('text/javascript' in r.content_type or 'application/javascript' in r.content_type): r.set_data(css_html_js_minify.js_minify(await r.get_data(as_text=True)))
+	###
 	return r
 
 def password_hash(password): return generate_password_hash(password, method='sha256')
