@@ -9,9 +9,9 @@ from flask_login import UserMixin, LoginManager, login_user, logout_user, curren
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
 from wtforms import TextField, SelectField, BooleanField, IntegerField, PasswordField
-from wtforms.validators import Email, EqualTo, Optional, Required
+from wtforms.validators import Email, EqualTo, Optional, DataRequired
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import HTTPException, InternalServerError
 from utils.nolog import *
 
@@ -44,6 +44,8 @@ lm.login_view = 'login'
 
 setlogfile('Sctf.log')
 
+tmpdir = app.config.get('TASKDATA_TMPDIR', '/tmp/Sctf')
+
 freeports_tcp = set(range(*app.config.get('TASK_PORT_RANGE', (51200, 51300))))
 freeports_udp = set(range(*app.config.get('TASK_PORT_RANGE', (51200, 51300))))
 secret_key = hashlib.md5(app.config['SECRET_KEY'].encode()).hexdigest().encode()
@@ -72,27 +74,27 @@ db.create_all()
 db.session.commit()
 
 class LoginForm(FlaskForm):
-	login = TextField('Login', validators=[Required("Login is required.")])
-	password = PasswordField('Password', validators=[Required("Password is required.")])
+	login = TextField('Login', validators=[DataRequired("Login is required.")])
+	password = PasswordField('Password', validators=[DataRequired("Password is required.")])
 	remember_me = BooleanField('Remember')
 
 class RegisterForm(FlaskForm):
-	nickname = TextField('Nickname', validators=[Required("Nickname is required.")])
-	email = TextField('E-Mail', validators=[Required("E-Mail is required."), Email("E-Mail must be valid.")])
+	nickname = TextField('Nickname', validators=[DataRequired("Nickname is required.")])
+	email = TextField('E-Mail', validators=[DataRequired("E-Mail is required."), Email("E-Mail must be valid.")])
 	discord_id = IntegerField('Discord id')
-	password = PasswordField('Password', validators=[Required("Password is required.")])
-	password_repeat = PasswordField('Repeat password', validators=[Required("Password repeat is required."), EqualTo('password', "Passwords must match.")])
+	password = PasswordField('Password', validators=[DataRequired("Password is required.")])
+	password_repeat = PasswordField('Repeat password', validators=[DataRequired("Password repeat is required."), EqualTo('password', "Passwords must match.")])
 	remember_me = BooleanField('Remember')
 
 class EditUserForm(FlaskForm):
 	nickname = TextField('Nickname')
-	email = TextField('E-Mail', validators=[Required("E-Mail is required."), Email("E-Mail must be valid.")])
+	email = TextField('E-Mail', validators=[DataRequired("E-Mail is required."), Email("E-Mail must be valid.")])
 	discord_id = IntegerField('Discord id')
 
 class ChangePasswordForm(FlaskForm):
-	current_password = PasswordField('Current password', validators=[Required("Password is required.")])
-	new_password = PasswordField('New password', validators=[Required("New password is required.")])
-	new_password_repeat = PasswordField('Repeat password', validators=[Required("Password repeat is required."), EqualTo('new_password', "Passwords must match.")])
+	current_password = PasswordField('Current password', validators=[DataRequired("Password is required.")])
+	new_password = PasswordField('New password', validators=[DataRequired("New password is required.")])
+	new_password_repeat = PasswordField('Repeat password', validators=[DataRequired("Password repeat is required."), EqualTo('new_password', "Passwords must match.")])
 
 class AdminBaseUserForm(FlaskForm):
 	nickname = TextField('Nickname')
@@ -112,8 +114,8 @@ class AdminDeleteUserForm(FlaskForm):
 
 class AdminPasswordResetForm(FlaskForm):
 	user = SelectField('User', coerce=int)
-	password = PasswordField('Password', validators=[Required("Password is required.")])
-	password_repeat = PasswordField('Repeat password', validators=[Required("Password repeat is required."), EqualTo('password', "Passwords must match.")])
+	password = PasswordField('Password', validators=[DataRequired("Password is required.")])
+	password_repeat = PasswordField('Repeat password', validators=[DataRequired("Password repeat is required."), EqualTo('password', "Passwords must match.")])
 
 class AdminSubsUserForm(FlaskForm):
 	user = SelectField('User', coerce=int)
@@ -141,11 +143,12 @@ def before_request():
 
 @app.after_request
 def after_request(r):
-	#if ('text/html' in r.content_type): r.set_data(css_html_js_minify.html_minify(r.get_data(as_text=True)))
+	if ('text/html' in r.content_type): r.set_data(css_html_js_minify.html_minify(r.get_data(as_text=True)))
+	elif ('text/css' in r.content_type): r.set_data(css_html_js_minify.css_minify(r.get_data(as_text=True)))
+	elif ('text/javascript' in r.content_type or 'application/javascript' in r.content_type): r.set_data(css_html_js_minify.js_minify(r.get_data(as_text=True)))
 	return r
 
-def password_hash(password): 
-	return generate_password_hash(password, method='sha256')
+def password_hash(password): return generate_password_hash(password, method='sha256')
 
 def mktoken(id: int, data: bytes) -> str:
 	id = VarInt.pack(id)
@@ -165,10 +168,6 @@ def check_token(token: [str, bytes], data: bytes) -> [int, None]:
 @lm.user_loader
 def load_user(id: int):
 	return User.query.filter_by(id=id).first()
-
-@dispatch
-def load_user(*, nickname: str):
-	return User.query.filter_by(nickname=nickname).first()
 
 @dispatch
 def load_user(**kwargs):
@@ -295,7 +294,8 @@ class Task:
 		else: flag = None
 
 		ext = os.path.splitext(srcfilename)[1]
-		outfilename = tempfile.mkstemp(prefix=os.path.basename(os.path.abspath(taskset.path))+'_taskdata_', suffix=outext if (outext is not None) else None)[1]
+		os.makedirs(tmpdir, exist_ok=True)
+		outfilename = tempfile.mkstemp(dir=tmpdir, prefix='taskdata_', suffix=outext if (outext is not None) else None)[1]
 
 		if (ext == '.sh'): cmd = f"""FLAG={repr(flag)} {srcfilename} {outfilename}"""
 		elif (ext == '.c'): cmd = f"""tcc {f'''-DFLAG='"{flag}"' ''' if (flag is not None) else ''}{srcfilename} -o {outfilename}"""
@@ -773,7 +773,7 @@ async def login():
 	form = LoginForm()
 	if (await validate_form(form)):
 		user = load_user(nickname=form.login.data)
-		if (not user):
+		if (not user or not check_password_hash(user.password, form.password.data)):
 			await flash("Incorrect login or password.")
 			return redirect(url_for('login'))
 		login_user(user, form.remember_me.data)
@@ -816,7 +816,7 @@ async def change_password():
 	form = ChangePasswordForm()
 
 	if (await validate_form(form)):
-		if not check_password_hash(g.user.password, form.current_password.data):
+		if (not check_password_hash(g.user.password, form.current_password.data)):
 			await flash("Current password is wrong.")
 			return redirect(url_for('change_password'))
 
@@ -1137,7 +1137,8 @@ async def admin_reload_tasks():
 def load_tasks():
 	global taskset
 
-	stale_taskdata = '/tmp/'+os.path.basename(os.path.abspath('.'))+'_taskdata_*'
+	assert (not glob.has_magic(tmpdir))
+	stale_taskdata = os.path.join(tmpdir, 'taskdata_*')
 	log(f"Removing stale taskdata: {stale_taskdata}")
 	for i in glob.iglob(stale_taskdata):
 		os.remove(i)
@@ -1160,12 +1161,13 @@ def init():
 	load_tasks()
 
 @apmain
+@aparg('-l', '--listen', default='0.0.0.0')
 @aparg('-p', '--port', type=int)
 @aparg('--debug', action='store_true')
 def main(cargs):
 	port = cargs.port or random.Random(sys.argv[0]+'|'+os.getcwd()).randint(60000, 65535)
-	if (cargs.debug): app.env = 'development'; setlogfile(None); app.run(port=port, debug=True, use_reloader=False)  # no autoreload to support cgis
-	else: app.run('0.0.0.0', port=port)
+	if (cargs.debug): app.env = 'development'; setlogfile(None); app.run(cargs.listen, port=port, debug=True, use_reloader=False)  # no autoreload to support cgis
+	else: app.run(cargs.listen, port=port)
 
 if (__name__ == '__main__'): exit(main())
 
