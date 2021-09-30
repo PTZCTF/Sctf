@@ -177,13 +177,13 @@ def load_user(**kwargs):
 
 @lm.request_loader
 def load_user_from_request(request):
-	header = request.headers.get('Authorization')
-	if (header is None): return None
-	header = header.replace('Basic ', '', 1).strip()
-	try: header = base64.b64decode(header)
-	except TypeError: pass
-	if (header != app.config['SECRET_KEY'].encode()): return None
-	return load_user(id=0, nickname='admin')
+	if ((header := request.headers.get('Authorization')) is not None):
+		header = header.replace('Basic ', '', 1).strip()
+		try: header = base64.b64decode(header)
+		except ValueError: pass
+		if (header != app.config['SECRET_KEY'].encode()): return None
+		return load_user(id=0)
+	return None
 
 def task_dir(id): return os.path.join('tasks', secure_filename(id))
 def load_task(id): return json.load(open(os.path.join(task_dir(id), 'task.json')))
@@ -798,6 +798,7 @@ async def register():
 			return redirect(url_for('register'))
 		else:
 			user = User(nickname=form.nickname.data, email=form.email.data, password=password_hash(form.password.data), discord_id=form.discord_id.data)
+			if (not load_user(0)): user.id = 0
 			db.session.add(user)
 			db.session.commit()
 			log(f"User registered: {user}")
@@ -851,7 +852,7 @@ async def submit_flag():
 	flag = request.args.get('flag')
 
 	task = taskset.tasks.get(id)
-	if (task is None): return abort(404, f"No task with such id: <code>{task}</code>.")
+	if (task is None): return abort(Response(f"No task with such id: <code>{task}</code>.", 404))
 
 	log(f"Got flag from {g.user} for {task}: '{flag}'")
 
@@ -883,7 +884,7 @@ async def submit_flag():
 		else:
 			if (r): logexception(WTFException(r))
 
-	return 'Success!'  # used in main.html template js
+	return "Success!"  # used in main.html template js
 
 @app.route('/taskdata')
 async def taskdata():
@@ -935,7 +936,7 @@ async def taskflag():
 @app.route('/web/<task>')
 async def web(task):
 	task = taskset.tasks.get(task)
-	if (task is None): return abort(404, f"No task with such id: <code>{task}</code>.")
+	if (task is None): return abort(Response(f"No task with such id: <code>{task}</code>.", 404))
 	if ('http' not in task.daemons.daemons): return abort(404, f"No web page for this task.")
 
 	response = await make_response(redirect(f"http://{task.daemons.http.host}:{task.daemons.http.port}"))
@@ -1104,10 +1105,10 @@ async def admin_get_flag():
 	user = request.args.get('user')
 	token = request.args.get('token')
 
-	if (task is None or not (user is not None or token is not None)): return abort(400, "Usage: <code>/?task=&lt;task&gt;&user=&lt;uid&gt;</code> or <code>/?task=&lt;task&gt;&token=&lt;token&gt;</code>.")
+	if (task is None or not (user is not None or token is not None)): return abort(Response("Usage: <code>/?task=&lt;task&gt;&user=&lt;uid&gt;</code> or <code>/?task=&lt;task&gt;&token=&lt;token&gt;</code>.", 400))
 
 	task = taskset.tasks.get(task)
-	if (task is None): return abort(404, f"No task with such id: <code>{task}</code>.")
+	if (task is None): return abort(Response(f"No task with such id: <code>{task}</code>.", 404))
 
 	if (token is not None):
 		user = check_token(token, task.id.encode())
